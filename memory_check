@@ -1,0 +1,106 @@
+#!/bin/bash
+ 
+AWK="/usr/bin/awk"
+BASENAME="/bin/basename"
+ECHO="/bin/echo"
+EGREP="/bin/egrep"
+FREE="/usr/bin/free"
+GREP="/bin/grep"
+ 
+THISPROG=$( ${BASENAME} $0 )
+ 
+VERBOSE=0
+ 
+E_OK=0
+E_WARNING=1
+E_CRITICAL=2
+E_UNKNOWN=3
+ 
+function print_error {
+   ${ECHO} "Error: $@" >&2
+}
+ 
+function printv {
+   (( VERBOSE )) && {
+      ${ECHO} "--> $@"
+   }
+}
+ 
+function print_usage {
+   {
+      ${ECHO} "Usage: ${THISPROG} [-hv] -w <warning_mb> -c <critical_mb>"
+      ${ECHO} "       -c   Critical memory (MB)"
+      ${ECHO} "       -w   Warning memory (MB)"
+      ${ECHO} "       -h   Display this usage message"
+      ${ECHO} "       -v   Verbose mode"
+   } >&2
+}
+ 
+function check_arguments {
+  ERROR_COUNT=0
+  if [ -z "${WARNING}" ]; then
+    print_error "-w option mandatory"
+    (( ERROR_COUNT = ERROR_COUNT + 1 ))
+  else
+    ${ECHO} "${WARNING}" | ${EGREP} -qs '^[0-9]+$'
+    if [ "$?" -ne "0" ]; then
+      print_error "-w must be an integer"
+      (( ERROR_COUNT = ERROR_COUNT + 1 ))
+    fi
+  fi
+  if [ -z "${CRITICAL}" ]; then
+    print_error "-c option mandatory"
+    (( ERROR_COUNT = ERROR_COUNT + 1 ))
+  else
+    ${ECHO} "${CRITICAL}" | ${EGREP} -qs '^[0-9]+$'
+    if [ "$?" -ne "0" ]; then
+      print_error "-c must be an integer"
+      (( ERROR_COUNT = ERROR_COUNT + 1 ))
+    fi
+  fi
+  if [ "${ERROR_COUNT}" -gt "0" ]; then
+    exit ${E_UNKNOWN}
+  else
+    if [ "${WARNING}" -gt "${CRITICAL}" ]; then                                       
+      print_error "-c must be > -w"                                                   
+      exit ${E_UNKNOWN}
+    fi
+  fi
+}
+ 
+function check_memory {
+  USED_MEMORY=$( free | grep Mem: | awk '{print $3}' )					
+  TOTAL_MEMORY=$( free | grep Mem: | awk '{print $2}' )         
+  PERCENTUSED=$(awk "BEGIN { pc=100*${USED_MEMORY}/${TOTAL_MEMORY}; i=int(pc); print (pc-i<0.5)?i:i+1 }")
+  if [ "${PERCENTUSED}" -ge "${CRITICAL}" ]; then					
+    ${ECHO} "CRITICAL: ${PERCENTUSED} % used."
+    exit ${E_CRITICAL}
+  elif [ "${PERCENTUSED}" -lt "${CRITICAL}" ] && [ "${PERCENTUSED}" -ge "${WARNING}" ]; then
+    ${ECHO} "WARNING: ${PERCENTUSED} % used."
+    exit ${E_WARNING}
+  else
+    ${ECHO} "OK: $PERCENTUSED % used."
+    exit ${E_OK}
+  fi
+}
+ 
+while getopts ":c:hvw:" OPTION; do
+  case ${OPTION} in
+     "c")  CRITICAL="${OPTARG}"    ;;
+     "h")  print_usage && exit 0   ;;
+     "v")  VERBOSE=1               ;;
+     "w")  WARNING="${OPTARG}"     ;;
+     *  )  print_usage && exit 1   ;;
+  esac
+done
+ 
+shift $(( ${OPTIND} - 1 ))
+ 
+if [ "$#" -ne "0" ]; then
+   print_usage && exit 1
+fi
+   
+check_arguments
+check_memory
+
+exit 0
